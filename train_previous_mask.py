@@ -411,7 +411,10 @@ if __name__ == "__main__":
     args.max_epoch = 20
     args.length_clip = 5
     args.batch_size = 4
-    
+    args.base_model = 'resnet101' 
+    args.augment = True
+    args.resize = True
+
     if article_config==1:
         args.loss_ratio = 0        
     else:        
