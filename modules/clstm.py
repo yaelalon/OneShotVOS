@@ -68,6 +68,7 @@ class ConvLSTMCell(nn.Module):
 
         return state
 
+        
 class ConvLSTMCellMask(nn.Module):
     """
     Generate a convolutional LSTM cell
@@ -78,9 +79,22 @@ class ConvLSTMCellMask(nn.Module):
         self.use_gpu = args.use_gpu
         self.input_size = input_size
         self.hidden_size = hidden_size
+        self.use_GS_hidden = args.use_GS_hidden
         self.Gates = nn.Conv2d(input_size + 2*hidden_size + 1, 4 * hidden_size, kernel_size, padding=padding)
-
-    def forward(self, input_, prev_mask, prev_state_spatial, hidden_state_temporal):
+        self.hidden_conv = nn.Conv2d(2*hidden_size,hidden_size,kernel_size,padding=padding)
+        self.mask_conv = nn.Conv2d(2,1,kernel_size,padding=padding)
+        
+    def get_hidden(self,hidden,batch_size,spatial_size):
+        # The function convets the hidden tensor to torch of zeros in xase it's None
+        if hidden is None:
+            state_size = [batch_size, self.hidden_size] + list(spatial_size)
+            if self.use_gpu:
+                hidden = Variable(torch.zeros(state_size)).cuda()
+            else:
+                hidden = Variable(torch.zeros(state_size))
+        return hidden
+            
+    def forward(self, input_, prev_mask, prev_state_spatial, hidden_state_temporal,mask_first,hideen_temporal_first):
 
         # get batch and spatial sizes
         batch_size = input_.data.size()[0]
@@ -99,17 +113,18 @@ class ConvLSTMCellMask(nn.Module):
                     Variable(torch.zeros(state_size)),
                     Variable(torch.zeros(state_size))
                 )
-                
-        if hidden_state_temporal is None:
-            state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            if self.use_gpu:
-                hidden_state_temporal = Variable(torch.zeros(state_size)).cuda()
-            else:
-                hidden_state_temporal = Variable(torch.zeros(state_size))
-
-
         prev_hidden_spatial, prev_cell_spatial = prev_state_spatial
+                
+        hidden_state_temporal = self.get_hidden(hidden_state_temporal,batch_size,spatial_size)
+        hideen_temporal_first = self.get_hidden(hideen_temporal_first,batch_size,spatial_size)
+        
+        if self.use_GS_hidden: # Evaluate hidden also from first
+           temporal_comb = torch.cat([hidden_state_temporal,hideen_temporal_first],1)
+           hidden_state_temporal = self.hidden_conv(temporal_comb)
 
+           mask_comb = torch.cat([prev_mask,mask_first],1)           
+           prev_mask = self.mask_conv(mask_comb) 
+           
         # data size is [batch, channel, height, width]
         stacked_inputs = torch.cat([input_, prev_mask, prev_hidden_spatial, hidden_state_temporal], 1)
         del prev_hidden_spatial, hidden_state_temporal

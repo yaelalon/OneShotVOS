@@ -3,7 +3,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from args import get_parser
 from modules.model import RSISMask, FeatureExtractor
-import torchvision.models as models
 from utils.hungarian import match, softIoU, reorder_mask
 from utils.utils import get_optimizer, batch_to_var, make_dir, check_parallel
 from utils.utils import outs_perms_to_cpu, save_checkpoint_prev_mask, load_checkpoint, get_base_params,get_skip_params,merge_params
@@ -122,14 +121,21 @@ def runIter(args, encoder, decoder, x, y_mask, sw_mask,
 
         mask_lstm = get_prev_mask(prev_mask,x,feats,t)
         if args.use_GS_hidden:
-            mask_lstm_first = get_prev_mask(mask_first,x,feats,t)
+            try:
+                mask_lstm_first = get_prev_mask(mask_first,x,feats,t)
+            except:
+                a = 1
         else:
             mask_lstm_first = None
             
         #The decoder receives two hidden state variables: hidden_spatial (a tuple, with hidden_state and cell_state) which refers to the
         #hidden state from the previous object instance from the same time instant, and hidden_temporal which refers to the hidden state from the same
         #object instance from the previous time instant.
-        out_mask, hidden = decoder(args,feats, mask_lstm, mask_lstm_first, hidden_spatial, hidden_temporal, hideen_temporal_first)
+        if args.use_GS_hidden:
+            out_mask, hidden = decoder(args,feats, mask_lstm, mask_lstm_first, hidden_spatial, hidden_temporal, hideen_temporal_first)
+        else:
+            out_mask, hidden = decoder(args,feats, mask_lstm, None, hidden_spatial, hidden_temporal, None)
+            
         hidden_tmp = []
         for ss in range(len(hidden)):
             hidden_tmp.append(hidden[ss][0])
@@ -293,8 +299,8 @@ def trainIters(args):
                             hideen_temporal_first = hidden_temporal_list
                             
                         if split == 'train':        
-                            if args.use_flip==1: # Flipped image and mask
-                                        
+                            
+                            if args.use_flip:                           
                                 loss_flip, _, outs_flip, hidden_temporal_list_flip, _ = runIter(args, encoder, decoder, x_flip, y_mask_flip, sw_mask,
                                                                                    crits, optims, split,
                                                                                    0, prev_hidden_temporal_list_flip,None, prev_mask_flip,None, last_frame)
@@ -410,9 +416,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     args.use_flip = 0 # Use consistenct term
-    args.use_GS_hidden = 1 # Add hidden state of one shot along all the process
+    args.use_GS_hidden = 1 # Add hidden state of one shot GS along all the process
     
-
     args.log_term = False
     args.models_path = os.path.join(os.path.abspath('..'),'models')
     if not os.path.isdir(args.models_path):

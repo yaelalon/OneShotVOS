@@ -119,337 +119,162 @@ class Evaluate():
                     continue
                 c = inv_palette[id_color]
                 colors.append(c)
-        if self.split == 'val':
 
-            jaccard_vec, F_vec= [],[]
+        jaccard_vec, F_vec= [],[]
+        
+        if args.dataset == 'youtube':
+
+            masks_sep_dir = os.path.join('../models', args.model_name, 'masks_sep_2assess')
+            make_dir(masks_sep_dir)
+            if args.overlay_masks:
+                results_dir = os.path.join('../models', args.model_name, 'results')
+                make_dir(results_dir)
+        
+            json_data = open('../../databases/YouTubeVOS/train/train-val-meta.json')
+            data = json.load(json_data)
+
+        else: #args.dataset == 'davis2017'
+
+            import lmdb
+            from misc.config import cfg
+
+            masks_sep_dir = os.path.join('../models', args.model_name, 'masks_sep_2assess-davis')
+            make_dir(masks_sep_dir)
+
+            if args.overlay_masks:
+                results_dir = os.path.join('../models', args.model_name, 'results-davis')
+                make_dir(results_dir)
+
+            lmdb_env_seq_dir = osp.join(cfg.PATH.DATA, 'lmdb_seq')
+
+            if osp.isdir(lmdb_env_seq_dir):
+                lmdb_env_seq = lmdb.open(lmdb_env_seq_dir)
+            else:
+                lmdb_env_seq = None
             
-            if args.dataset == 'youtube':
+        for batch_idx, (inputs, inputs_flip, targets, targets_flip,seq_name,starting_frame) in enumerate(self.loader):
+            prev_hidden_temporal_list = None
+            max_ii = min(len(inputs),args.length_clip)
 
-                masks_sep_dir = os.path.join('../models', args.model_name, 'masks_sep_2assess')
-                make_dir(masks_sep_dir)
-                if args.overlay_masks:
-                    results_dir = os.path.join('../models', args.model_name, 'results')
-                    make_dir(results_dir)
-            
-                json_data = open('../../databases/YouTubeVOS/train/train-val-meta.json')
-                data = json.load(json_data)
+            if args.overlay_masks:
+                base_dir = results_dir + '/' + seq_name[0] + '/'
+                make_dir(base_dir)
 
-            else: #args.dataset == 'davis2017'
+            if args.dataset == 'davis2017':
+                key_db = osp.basename(seq_name[0])
 
-                import lmdb
-                from misc.config import cfg
-
-                masks_sep_dir = os.path.join('../models', args.model_name, 'masks_sep_2assess-davis')
-                make_dir(masks_sep_dir)
-
-                if args.overlay_masks:
-                    results_dir = os.path.join('../models', args.model_name, 'results-davis')
-                    make_dir(results_dir)
-
-                lmdb_env_seq_dir = osp.join(cfg.PATH.DATA, 'lmdb_seq')
-
-                if osp.isdir(lmdb_env_seq_dir):
-                    lmdb_env_seq = lmdb.open(lmdb_env_seq_dir)
+                if not lmdb_env_seq == None:
+                    with lmdb_env_seq.begin() as txn:
+                        _files_vec = txn.get(key_db.encode()).decode().split('|')
+                        _files = [osp.splitext(f)[0] for f in _files_vec]
                 else:
-                    lmdb_env_seq = None
+                    seq_dir = osp.join(cfg['PATH']['SEQUENCES'], key_db)
+                    _files_vec = os.listdir(seq_dir)
+                    _files = [osp.splitext(f)[0] for f in _files_vec]
+
+                frame_names = sorted(_files)
+
+            for ii in range(max_ii):
+                x, y_mask, sw_mask = batch_to_var(args, inputs[ii], targets[ii])
+
+                if ii == 0:
+                    prev_mask = y_mask
                 
-            for batch_idx, (inputs, inputs_flip, targets, targets_flip,seq_name,starting_frame) in enumerate(self.loader):
+                #from one frame to the following frame the prev_hidden_temporal_list is updated.
+                outs, hidden_temporal_list = test_prev_mask(args, self.encoder, self.decoder, x, prev_hidden_temporal_list, prev_mask)
 
-                prev_hidden_temporal_list = None
-                max_ii = min(len(inputs),args.length_clip)
-
-                if args.overlay_masks:
-                    base_dir = results_dir + '/' + seq_name[0] + '/'
-                    make_dir(base_dir)
-
-                if args.dataset == 'davis2017':
-                    key_db = osp.basename(seq_name[0])
-
-                    if not lmdb_env_seq == None:
-                        with lmdb_env_seq.begin() as txn:
-                            _files_vec = txn.get(key_db.encode()).decode().split('|')
-                            _files = [osp.splitext(f)[0] for f in _files_vec]
-                    else:
-                        seq_dir = osp.join(cfg['PATH']['SEQUENCES'], key_db)
-                        _files_vec = os.listdir(seq_dir)
-                        _files = [osp.splitext(f)[0] for f in _files_vec]
-
-                    frame_names = sorted(_files)
-
-                for ii in range(max_ii):
-
-                    #start_time = time.time()
-                    #                x: input images (N consecutive frames from M different sequences)
-                    #                y_mask: ground truth annotations (some of them are zeros to have a fixed length in number of object instances)
-                    #                sw_mask: this mask indicates which masks from y_mask are valid
-                    x, y_mask, sw_mask = batch_to_var(args, inputs[ii], targets[ii])
-
-                    if ii == 0:
-                        prev_mask = y_mask
-                    
-                    #from one frame to the following frame the prev_hidden_temporal_list is updated.
-                    outs, hidden_temporal_list = test_prev_mask(args, self.encoder, self.decoder, x, prev_hidden_temporal_list, prev_mask)
-
-                    # Check measures
-                    jaccard_vec.append(jaccard_simple(y_mask,outs))
-                    F_vec.append(eval_F(y_mask,outs))
-                    
-                    if args.dataset == 'youtube':
-                        num_instances = len(data['videos'][seq_name[0]]['objects'])
-                    else:
-                        num_instances = int(torch.sum(sw_mask.data).data.cpu().numpy())
-
-                    base_dir_masks_sep = masks_sep_dir + '/' + seq_name[0] + '/'
-                    make_dir(base_dir_masks_sep)
-
-                    x_tmp = x.data.cpu().numpy()
-                    height = x_tmp.shape[-2]
-                    width = x_tmp.shape[-1]
-                    for t in range(num_instances):
-                        mask_pred = (torch.squeeze(outs[0,t,:])).cpu().numpy()
-                        mask_pred = np.reshape(mask_pred, (height, width))
-                        indxs_instance = np.where(mask_pred > 0.5)
-                        mask2assess = np.zeros((height,width))
-                        mask2assess[indxs_instance] = 255
-                        if args.dataset == 'youtube':
-                            toimage(mask2assess, cmin=0, cmax=255).save(base_dir_masks_sep + '%05d_instance_%02d.png' %(starting_frame[0]+ii,t))
-                        else:
-                            toimage(mask2assess, cmin=0, cmax=255).save(base_dir_masks_sep + frame_names[ii] + '_instance_%02d.png' % (t))
-
-                    #end_saving_masks_time = time.time()
-                    #print("inference + saving masks time: %.3f" %(end_saving_masks_time - start_time))
-                    if args.dataset == 'youtube':
-                        print(seq_name[0] + '/' + '%05d' % (starting_frame[0] + ii))
-                    else:
-                        print(seq_name[0] + '/' + frame_names[ii])
-
-                    if args.overlay_masks:
-
-                        frame_img = x.data.cpu().numpy()[0,:,:,:].squeeze()
-                        frame_img = np.transpose(frame_img, (1,2,0))
-                        mean = np.array([0.485, 0.456, 0.406])
-                        std = np.array([0.229, 0.224, 0.225])
-                        frame_img = std * frame_img + mean
-                        frame_img = np.clip(frame_img, 0, 1)
-                        plt.figure();plt.axis('off')
-                        plt.figure();plt.axis('off')
-                        plt.imshow(frame_img)
-
-                        for t in range(num_instances):
-
-                            mask_pred = (torch.squeeze(outs[0,t,:])).cpu().numpy()
-                            mask_pred = np.reshape(mask_pred, (height, width))
-
-                            ax = plt.gca()
-                            tmp_img = np.ones((mask_pred.shape[0], mask_pred.shape[1], 3))
-                            color_mask = np.array(colors[t])/255.0
-                            for i in range(3):
-                                tmp_img[:,:,i] = color_mask[i]
-                            ax.imshow(np.dstack( (tmp_img, mask_pred*0.7) ))
-
-                        if args.dataset == 'youtube':
-                            figname = base_dir + 'frame_%02d.png' %(starting_frame[0]+ii)
-                        else:
-                            figname = base_dir + frame_names[ii] + '.png'
-
-                        plt.savefig(figname,bbox_inches='tight')
-                        plt.close()
-
-
-                    if self.video_mode:
-                        if args.only_spatial == False:
-                            prev_hidden_temporal_list = hidden_temporal_list
-                        if ii > 0:
-                            prev_mask = outs
-                        else:
-                            prev_mask = y_mask
-
-                    del outs, hidden_temporal_list, x, y_mask, sw_mask
-            print('Mean Jaccard index(IOU) = %2f, mean F score = %2f' %(mean(jaccard_vec),mean(F_vec)))
-        else:
-            
-            if args.dataset == 'youtube':
-
-                masks_sep_dir = os.path.join('../models', args.model_name, 'masks_sep_2assess_val')
-                make_dir(masks_sep_dir)
-                if args.overlay_masks:
-                    results_dir = os.path.join('../models', args.model_name, 'results_val')
-                    make_dir(results_dir)
-
-                json_data = open('../../databases/YouTubeVOS/val/meta.json')
-                data = json.load(json_data)
-
-            else: #args.dataset == 'davis2017'
-
-                import lmdb
-                from misc.config import cfg
-
-                masks_sep_dir = os.path.join('../models', args.model_name, 'masks_sep_2assess_val_davis')
-                make_dir(masks_sep_dir)
-                if args.overlay_masks:
-                    results_dir = os.path.join('../models', args.model_name, 'results_val_davis')
-                    make_dir(results_dir)
-
-                lmdb_env_seq_dir = osp.join(cfg.PATH.DATA, 'lmdb_seq')
-
-                if osp.isdir(lmdb_env_seq_dir):
-                    lmdb_env_seq = lmdb.open(lmdb_env_seq_dir)
-                else:
-                    lmdb_env_seq = None
-
-            
-            for batch_idx, (inputs,seq_name,starting_frame) in enumerate(self.loader):
-
-                prev_hidden_temporal_list = None
-                max_ii = min(len(inputs),args.length_clip)
-
-                if args.overlay_masks:
-                    base_dir = results_dir + '/' + seq_name[0] + '/'
-                    make_dir(base_dir)
-
+                # Check measures
+                jaccard_vec.append(jaccard_simple(y_mask.cpu().numpy(),outs.cpu().numpy()))
+                #F_vec.append(eval_F(y_mask.cpu().numpy(),outs.cpu().numpy()))
+                
                 if args.dataset == 'youtube':
+                    num_instances = len(data['videos'][seq_name[0]]['objects'])
+                else:
+                    num_instances = int(torch.sum(sw_mask.data).data.cpu().numpy())
 
-                    seq_data = data['videos'][seq_name[0]]['objects']
-                    frame_names = []
-                    frame_names_with_new_objects = []
-                    instance_ids = []
+                base_dir_masks_sep = masks_sep_dir + '/' + seq_name[0] + '/'
+                make_dir(base_dir_masks_sep)
 
-                    for obj_id in seq_data.keys():
-                        instance_ids.append(int(obj_id))
-                        frame_names_with_new_objects.append(seq_data[obj_id]['frames'][0])
-                        for frame_name in seq_data[obj_id]['frames']:
-                            if frame_name not in frame_names:
-                                frame_names.append(frame_name)
-
-                    frame_names.sort()
-                    frame_names_with_new_objects_idxs = []
-                    for kk in range(len(frame_names_with_new_objects)):
-                        new_frame_idx = frame_names.index(frame_names_with_new_objects[kk])
-                        frame_names_with_new_objects_idxs.append(new_frame_idx)
-
-                else: #davis2017
-
-                    key_db = osp.basename(seq_name[0])
-
-                    if not lmdb_env_seq == None:
-                        with lmdb_env_seq.begin() as txn:
-                            _files_vec = txn.get(key_db.encode()).decode().split('|')
-                            _files = [osp.splitext(f)[0] for f in _files_vec]
+                x_tmp = x.data.cpu().numpy()
+                height = x_tmp.shape[-2]
+                width = x_tmp.shape[-1]
+                for t in range(num_instances):
+                    mask_pred = (torch.squeeze(outs[0,t,:])).cpu().numpy()
+                    mask_pred = np.reshape(mask_pred, (height, width))
+                    
+                    GS = (torch.squeeze(y_mask[0,t,:])).cpu().numpy()
+                    GS = np.reshape(GS, (height, width))
+                                                
+                    indxs_instance = np.where(mask_pred > 0.5)
+                    mask2assess = np.zeros((height,width))
+                    maskboll = np.zeros((height,width))
+                    mask2assess[indxs_instance] = 255
+                    maskboll[indxs_instance] = 1
+                    
+                    jaccard_vec.append(jaccard_simple(GS,maskboll))
+                    F_vec.append(eval_F(GS,maskboll))
+                    
+                    if args.dataset == 'youtube':
+                        toimage(mask2assess, cmin=0, cmax=255).save(base_dir_masks_sep + '%05d_instance_%02d.png' %(starting_frame[0]+ii,t))
                     else:
-                        seq_dir = osp.join(cfg['PATH']['SEQUENCES'], key_db)
-                        _files_vec = os.listdir(seq_dir)
-                        _files = [osp.splitext(f)[0] for f in _files_vec]
+                        toimage(mask2assess, cmin=0, cmax=255).save(base_dir_masks_sep + frame_names[ii] + '_instance_%02d.png' % (t))
 
-                    frame_names = sorted(_files)
-
-                for ii in range(max_ii):
-
-                    #                x: input images (N consecutive frames from M different sequences)
-                    #                y_mask: ground truth annotations (some of them are zeros to have a fixed length in number of object instances)
-                    #                sw_mask: this mask indicates which masks from y_mask are valid
-                    x = batch_to_var_test(args, inputs[ii])
-
+                #end_saving_masks_time = time.time()
+                #print("inference + saving masks time: %.3f" %(end_saving_masks_time - start_time))
+                if args.dataset == 'youtube':
+                    print(seq_name[0] + '/' + '%05d' % (starting_frame[0] + ii))
+                else:
                     print(seq_name[0] + '/' + frame_names[ii])
 
-                    if ii == 0:
+                if args.overlay_masks:
 
-                        frame_name = frame_names[0]
-                        if args.dataset == 'youtube':
-                            annotation = Image.open('../../databases/YouTubeVOS/val/Annotations/' + seq_name[0] + '/' + frame_name + '.png')
-                            annot = imresize(annotation, (256, 448), interp='nearest')
-                        else: #davis2017
-                            annotation = Image.open('../../databases/DAVIS2017/Annotations/480p/' + seq_name[0] + '/' + frame_name + '.png')
-                            instance_ids = sorted(np.unique(annotation))
-                            instance_ids = instance_ids if instance_ids[0] else instance_ids[1:]
-                            if len(instance_ids) > 0:
-                                instance_ids = instance_ids[:-1] if instance_ids[-1] == 255 else instance_ids
-                            annot = imresize(annotation, (240, 427), interp='nearest')
+                    frame_img = x.data.cpu().numpy()[0,:,:,:].squeeze()
+                    frame_img = np.transpose(frame_img, (1,2,0))
+                    mean = np.array([0.485, 0.456, 0.406])
+                    std = np.array([0.229, 0.224, 0.225])
+                    frame_img = std * frame_img + mean
+                    frame_img = np.clip(frame_img, 0, 1)
+                    plt.figure();plt.axis('off')
+                    plt.figure();plt.axis('off')
+                    plt.imshow(frame_img)
 
-                        annot = np.expand_dims(annot, axis=0)
-                        annot = torch.from_numpy(annot)
-                        annot = annot.float()
-                        annot = annot.numpy().squeeze()
-                        annot = annot_from_mask(annot, instance_ids)
-                        prev_mask = annot
-                        prev_mask = np.expand_dims(prev_mask, axis=0)
-                        prev_mask = torch.from_numpy(prev_mask)
-                        y_mask = Variable(prev_mask.float(),requires_grad=False)
-                        prev_mask = y_mask.cuda()
-                        del annot
+                    for t in range(num_instances):
+
+                        mask_pred = (torch.squeeze(outs[0,t,:])).cpu().numpy()
+                        mask_pred = np.reshape(mask_pred, (height, width))
+
+                        ax = plt.gca()
+                        tmp_img = np.ones((mask_pred.shape[0], mask_pred.shape[1], 3))
+                        color_mask = np.array(colors[t])/255.0
+                        for i in range(3):
+                            tmp_img[:,:,i] = color_mask[i]
+                        ax.imshow(np.dstack( (tmp_img, mask_pred*0.7) ))
 
                     if args.dataset == 'youtube':
-                        if ii>0 and ii in frame_names_with_new_objects_idxs:
+                        figname = base_dir + 'frame_%02d.png' %(starting_frame[0]+ii)
+                    else:
+                        figname = base_dir + frame_names[ii] + '.png'
 
-                            frame_name = frame_names[ii]
-                            annotation = Image.open('../../databases/YouTubeVOS/val/Annotations/' + seq_name[0] + '/' + frame_name + '.png')
-                            annot = imresize(annotation, (256, 448), interp='nearest')
-                            annot = np.expand_dims(annot, axis=0)
-                            annot = torch.from_numpy(annot)
-                            annot = annot.float()
-                            annot = annot.numpy().squeeze()
-                            new_instance_ids = np.unique(annot)[1:]
-                            annot = annot_from_mask(annot, new_instance_ids)
-                            annot = np.expand_dims(annot, axis=0)
-                            annot = torch.from_numpy(annot)
-                            annot = Variable(annot.float(),requires_grad=False)
-                            annot = annot.cuda()
-                            for kk in new_instance_ids:
-                                prev_mask[:,int(kk-1),:] = annot[:,int(kk-1),:]
-                            del annot
+                    plt.savefig(figname,bbox_inches='tight')
+                    plt.close()
 
-                    #from one frame to the following frame the prev_hidden_temporal_list is updated.
-                    outs, hidden_temporal_list = test_prev_mask(args, self.encoder, self.decoder, x, prev_hidden_temporal_list, prev_mask)
 
-                    base_dir_masks_sep = masks_sep_dir +  '/' + seq_name[0] + '/'
-                    make_dir(base_dir_masks_sep)
+                if self.video_mode:
+                    if args.only_spatial == False:
+                        prev_hidden_temporal_list = hidden_temporal_list
+                    if ii > 0:
+                        prev_mask = outs
+                    else:
+                        prev_mask = y_mask
 
-                    x_tmp = x.data.cpu().numpy()
-                    height = x_tmp.shape[-2]
-                    width = x_tmp.shape[-1]
+                del outs, hidden_temporal_list, x, y_mask, sw_mask
 
-                    for t in range(len(instance_ids)):
-                        mask_pred = (torch.squeeze(outs[0, t, :])).cpu().numpy()
-                        mask_pred = np.reshape(mask_pred, (height, width))
-                        indxs_instance = np.where(mask_pred > 0.5)
-                        mask2assess = np.zeros((height, width))
-                        mask2assess[indxs_instance] = 255
-                        toimage(mask2assess, cmin=0, cmax=255).save(
-                            base_dir_masks_sep + frame_names[ii] + '_instance_%02d.png' % (t))
-
-                    if args.overlay_masks:
-
-                        frame_img = x.data.cpu().numpy()[0,:,:,:].squeeze()
-                        frame_img = np.transpose(frame_img, (1,2,0))
-                        mean = np.array([0.485, 0.456, 0.406])
-                        std = np.array([0.229, 0.224, 0.225])
-                        frame_img = std * frame_img + mean
-                        frame_img = np.clip(frame_img, 0, 1)
-                        plt.figure();plt.axis('off')
-                        plt.figure();plt.axis('off')
-                        plt.imshow(frame_img)
-
-                        for t in range(len(instance_ids)):
-
-                            mask_pred = (torch.squeeze(outs[0,t,:])).cpu().numpy()
-                            mask_pred = np.reshape(mask_pred, (height, width))
-                            ax = plt.gca()
-                            tmp_img = np.ones((mask_pred.shape[0], mask_pred.shape[1], 3))
-                            color_mask = np.array(colors[t])/255.0
-                            for i in range(3):
-                                tmp_img[:,:,i] = color_mask[i]
-                            ax.imshow(np.dstack( (tmp_img, mask_pred*0.7) ))
-
-                        figname = base_dir + frame_names[ii] +'.png'
-                        plt.savefig(figname,bbox_inches='tight')
-                        plt.close()
-
-                    if self.video_mode:
-                        if args.only_spatial == False:
-                            prev_hidden_temporal_list = hidden_temporal_list
-                        if ii > 0:
-                            prev_mask = outs
-                        del x, hidden_temporal_list, outs
-                            
+            #print('Mean Jaccard index(IOU) = %2f, mean F score = %2f' %(sumjaccard_vec),mean(F_vec)))
+            print('Mean Jaccard index(IOU) = %2f' % (sum(jaccard_vec)/len(jaccard_vec)))
+        
+        Mean_jaccared = sum(jaccard_vec)/len(jaccard_vec)
+        Mean_F = sum(F_vec)/len(F_vec)
+        return Mean_jaccared, Mean_F                   
 
                         
 def annot_from_mask(annot, instance_ids):        
@@ -483,7 +308,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     #args.model_name = '15_02_22-23_youtube_flipflip_prev_mask'
-    args.model_name = 'tmp'
+    args.model_name = 'Article'
     args.dataset = 'davis2017' 
     args.eval_split = 'val' 
     args.batch_size = 1 
@@ -502,4 +327,6 @@ if __name__ == "__main__":
         sys.stdout = open(os.path.join('../models',args.model_name, 'eval.log'), 'w')
 
     E = Evaluate(args)
-    E.run_eval()
+    Mean_jaccared, Mean_F  = E.run_eval()
+
+    print('Mean jaccared index(IOU)= %.2f, Mean F= %.2f' % (Mean_jaccared,Mean_F))
