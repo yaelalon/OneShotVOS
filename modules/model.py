@@ -213,7 +213,7 @@ class RSISMask(nn.Module):
 
 
    
-    def forward(self, skip_feats, prev_mask, prev_state_spatial, prev_hidden_temporal):     
+    def forward(self,args, skip_feats, prev_mask,mask_first, prev_state_spatial, prev_hidden_temporal, hidden_temporal_first):     
                   
         clstm_in = skip_feats[0]
         skip_feats = skip_feats[1:]
@@ -224,16 +224,24 @@ class RSISMask(nn.Module):
             # hidden states will be initialized the first time forward is called
             if prev_state_spatial is None:
                 if prev_hidden_temporal is None:
-                    state = self.clstm_list[i](clstm_in, prev_mask[i], None, None)
+                    state = self.clstm_list[i](clstm_in, prev_mask[i], None, None, None, None)
+                    if args.use_GS_hidden:
+                        state = self.clstm_list[i](clstm_in, prev_mask[i], None, None, mask_first[i], None)                                                
                 else:
-                    state = self.clstm_list[i](clstm_in, prev_mask[i], None, prev_hidden_temporal[i])
+                    state = self.clstm_list[i](clstm_in, prev_mask[i], None, prev_hidden_temporal[i], None, None)
+                    if args.use_GS_hidden:
+                        state = self.clstm_list[i](clstm_in, prev_mask[i], None, None, mask_first[i], hidden_temporal_first[i])                                                
             else:
                 # else we take the ones from the previous step for the forward pass
                 if prev_hidden_temporal is None:
-                    state = self.clstm_list[i](clstm_in, prev_mask[i], prev_state_spatial[i], None)
-                    
+                    state = self.clstm_list[i](clstm_in, prev_mask[i], prev_state_spatial[i], None, None, None)
+                    if args.use_GS_hidden:
+                        state = self.clstm_list[i](clstm_in, prev_mask[i], prev_state_spatial[i], None, mask_first[i], None)
                 else:
-                    state = self.clstm_list[i](clstm_in, prev_mask[i], prev_state_spatial[i], prev_hidden_temporal[i])
+                    state = self.clstm_list[i](clstm_in, prev_mask[i], prev_state_spatial[i], prev_hidden_temporal[i], None, None)
+                    if args.use_GS_hidden:
+                        state = self.clstm_list[i](clstm_in, prev_mask[i], prev_state_spatial[i], prev_hidden_temporal[i], mask_first[i], hidden_temporal_first[i])
+                    
                     #print(prev_hidden_temporal[i].shape)
             hidden_list.append(state)
             hidden = state[0]

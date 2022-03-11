@@ -22,6 +22,8 @@ import json
 from torch.autograd import Variable
 import time
 import os.path as osp
+from measures.f_boundary import db_eval_boundary as eval_F
+from measures.jaccard import db_eval_iou as jaccard_simple
 
 
 
@@ -117,8 +119,9 @@ class Evaluate():
                     continue
                 c = inv_palette[id_color]
                 colors.append(c)
-
         if self.split == 'val':
+
+            jaccard_vec, F_vec= [],[]
             
             if args.dataset == 'youtube':
 
@@ -183,13 +186,14 @@ class Evaluate():
 
                     if ii == 0:
                         prev_mask = y_mask
-
+                    
                     #from one frame to the following frame the prev_hidden_temporal_list is updated.
                     outs, hidden_temporal_list = test_prev_mask(args, self.encoder, self.decoder, x, prev_hidden_temporal_list, prev_mask)
 
-                    #end_inference_time = time.time()
-                    #print("inference time: %.3f" %(end_inference_time-start_time))
-
+                    # Check measures
+                    jaccard_vec.append(jaccard_simple(y_mask,outs))
+                    F_vec.append(eval_F(y_mask,outs))
+                    
                     if args.dataset == 'youtube':
                         num_instances = len(data['videos'][seq_name[0]]['objects'])
                     else:
@@ -261,7 +265,7 @@ class Evaluate():
                             prev_mask = y_mask
 
                     del outs, hidden_temporal_list, x, y_mask, sw_mask
-            
+            print('Mean Jaccard index(IOU) = %2f, mean F score = %2f' %(mean(jaccard_vec),mean(F_vec)))
         else:
             
             if args.dataset == 'youtube':
@@ -479,7 +483,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     #args.model_name = '15_02_22-23_youtube_flipflip_prev_mask'
-    args.model_name = '15_02_22-13_article_local_run'
+    args.model_name = 'tmp'
     args.dataset = 'davis2017' 
     args.eval_split = 'val' 
     args.batch_size = 1 
