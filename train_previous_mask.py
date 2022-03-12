@@ -91,7 +91,7 @@ def get_prev_mask(prev_mask,x,feats,t):
     return mask_lstm
 
 def runIter(args, encoder, decoder, x, y_mask, sw_mask,
-            crits, optims, mode='train', loss = None, prev_hidden_temporal_list=None,hideen_temporal_first = None, prev_mask = None, mask_first = None,last_frame=False):
+            crits, optims, mode='train', loss = None, prev_hidden_temporal_list=None,hideen_temporal_first_list = None, prev_mask = None, mask_first = None,last_frame=False):
     """
     Runs forward a batch
     """
@@ -116,15 +116,15 @@ def runIter(args, encoder, decoder, x, y_mask, sw_mask,
         #If this is the first frame of the sequence, hidden_temporal is initialized to None. Otherwise, it is set with the value from previous time instant.
         if prev_hidden_temporal_list is not None:
             hidden_temporal = prev_hidden_temporal_list[t]
+            if args.use_GS_hidden:
+                hideen_temporal_first = hideen_temporal_first_list[t]
         else:
             hidden_temporal = None
+            hideen_temporal_first = None
 
         mask_lstm = get_prev_mask(prev_mask,x,feats,t)
         if args.use_GS_hidden:
-            try:
-                mask_lstm_first = get_prev_mask(mask_first,x,feats,t)
-            except:
-                a = 1
+            mask_lstm_first = get_prev_mask(mask_first,x,feats,t)
         else:
             mask_lstm_first = None
             
@@ -333,7 +333,8 @@ def trainIters(args):
                                                     
                         # Hidden temporal state from time instant ii is saved to be used when processing next time instant ii+1
                         prev_hidden_temporal_list = hidden_temporal_list
-                        prev_hidden_temporal_list_flip = hidden_temporal_list_flip
+                        if args.use_flip:                           
+                            prev_hidden_temporal_list_flip = hidden_temporal_list_flip
 
                         prev_mask = y_mask
                         prev_mask_flip = y_mask_flip
@@ -415,7 +416,7 @@ if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
     
-    args.use_flip = 0 # Use consistenct term
+    args.use_flip = 0 # Use consistency term
     args.use_GS_hidden = 1 # Add hidden state of one shot GS along all the process
     
     args.log_term = False

@@ -121,13 +121,14 @@ class ConvLSTMCellMask(nn.Module):
         if self.use_GS_hidden: # Evaluate hidden also from first
            temporal_comb = torch.cat([hidden_state_temporal,hideen_temporal_first],1)
            hidden_state_temporal = self.hidden_conv(temporal_comb)
-
            mask_comb = torch.cat([prev_mask,mask_first],1)           
            prev_mask = self.mask_conv(mask_comb) 
+           del hideen_temporal_first, mask_first
+
            
         # data size is [batch, channel, height, width]
         stacked_inputs = torch.cat([input_, prev_mask, prev_hidden_spatial, hidden_state_temporal], 1)
-        del prev_hidden_spatial, hidden_state_temporal
+        del prev_hidden_spatial, hidden_state_temporal, prev_mask, input_
         gates = self.Gates(stacked_inputs)
 
         # chunk across channel dimension
