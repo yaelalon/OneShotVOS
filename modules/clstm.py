@@ -81,8 +81,10 @@ class ConvLSTMCellMask(nn.Module):
         self.hidden_size = hidden_size
         self.use_GS_hidden = args.use_GS_hidden
         self.Gates = nn.Conv2d(input_size + 2*hidden_size + 1, 4 * hidden_size, kernel_size, padding=padding)
-        self.hidden_conv = nn.Conv2d(2*hidden_size,hidden_size,kernel_size,padding=padding)
-        self.mask_conv = nn.Conv2d(2,1,kernel_size,padding=padding)
+        
+        if args.use_GS_hidden:
+            self.hidden_conv = nn.Conv2d(2*hidden_size,hidden_size,kernel_size,padding=padding)
+            self.mask_conv = nn.Conv2d(2,1,kernel_size,padding=padding)
         
     def get_hidden(self,hidden,batch_size,spatial_size):
         # The function convets the hidden tensor to torch of zeros in xase it's None

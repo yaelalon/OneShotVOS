@@ -75,7 +75,7 @@ def softIoU(target, out, e=1e-6):
 
 
     out = torch.sigmoid(out)
-
+    
     num = (out*target).sum(1,True)
     den = (out+target-out*target).sum(1,True) + e
     iou = num / den

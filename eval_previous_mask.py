@@ -13,6 +13,7 @@ from scipy.misc import imresize
 from scipy.misc import toimage
 #import scipy
 from dataloader.dataset_utils import get_dataset
+from torchvision import models
 import torch
 import numpy as np
 from torchvision import transforms
@@ -24,7 +25,7 @@ import time
 import os.path as osp
 from measures.f_boundary import db_eval_boundary as eval_F
 from measures.jaccard import db_eval_iou as jaccard_simple
-
+import pickle
 
 
 class Evaluate():
@@ -154,6 +155,7 @@ class Evaluate():
             
         for batch_idx, (inputs, inputs_flip, targets, targets_flip,seq_name,starting_frame) in enumerate(self.loader):
             prev_hidden_temporal_list = None
+            hideen_temporal_first = None
             max_ii = min(len(inputs),args.length_clip)
 
             if args.overlay_masks:
@@ -173,16 +175,23 @@ class Evaluate():
                     _files = [osp.splitext(f)[0] for f in _files_vec]
 
                 frame_names = sorted(_files)
-
+                
             for ii in range(max_ii):
                 x, y_mask, sw_mask = batch_to_var(args, inputs[ii], targets[ii])
 
                 if ii == 0:
                     prev_mask = y_mask
+                    if args.use_GS_hidden:
+                        mask_first = y_mask
+                    else:
+                        mask_first = None
                 
                 #from one frame to the following frame the prev_hidden_temporal_list is updated.
-                outs, hidden_temporal_list = test_prev_mask(args, self.encoder, self.decoder, x, prev_hidden_temporal_list, prev_mask)
+                outs, hidden_temporal_list = test_prev_mask(args, self.encoder, self.decoder, x,hideen_temporal_first, prev_hidden_temporal_list, prev_mask, mask_first)
 
+                if ii == 0:
+                    hideen_temporal_first = hidden_temporal_list
+                            
                 # Check measures
                 jaccard_vec.append(jaccard_simple(y_mask.cpu().numpy(),outs.cpu().numpy()))
                 #F_vec.append(eval_F(y_mask.cpu().numpy(),outs.cpu().numpy()))
@@ -304,11 +313,10 @@ def annot_from_mask(annot, instance_ids):
 
 if __name__ == "__main__":
     
-    parser = get_parser()
-    args = parser.parse_args()
-    
-    #args.model_name = '15_02_22-23_youtube_flipflip_prev_mask'
-    args.model_name = 'Article'
+    model_name = '15_03_22-00_youtube_prev_mask'
+    args = pickle.load(open(os.path.join('../models',model_name,'args.pkl'),'rb'))
+   
+    args.model_name = model_name
     args.dataset = 'davis2017' 
     args.eval_split = 'val' 
     args.batch_size = 1 

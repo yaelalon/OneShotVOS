@@ -10,6 +10,7 @@ from dataloader.dataset_utils import get_dataset
 from dataloader.dataset_utils import sequence_palette
 from scipy.ndimage.measurements import center_of_mass
 import torch
+from torchvision import models
 import torch.nn as nn
 import numpy as np
 from torch.autograd import Variable
@@ -128,7 +129,7 @@ def runIter(args, encoder, decoder, x, y_mask, sw_mask,
         else:
             mask_lstm_first = None
             
-        #The decoder receives two hidden state variables: hidden_spatial (a tuple, with hidden_state and cell_state) which refers to the
+        # The decoder receives two hidden state variables: hidden_spatial (a tuple, with hidden_state and cell_state) which refers to the
         #hidden state from the previous object instance from the same time instant, and hidden_temporal which refers to the hidden state from the same
         #object instance from the previous time instant.
         if args.use_GS_hidden:
@@ -172,10 +173,10 @@ def runIter(args, encoder, decoder, x, y_mask, sw_mask,
                    
     losses = [loss.data.item(), loss_mask_iou.data.item()]
     
-    out_masks = torch.sigmoid(out_masks)
-    outs = out_masks.data
+    outs = torch.sigmoid(out_masks)
+    outs = outs.data
 
-    return loss, losses, outs, hidden_temporal_list, sw_mask
+    return loss, losses, outs, hidden_temporal_list, sw_mask, out_masks
     
 
 def trainIters(args):
@@ -266,6 +267,7 @@ def trainIters(args):
                     prev_hidden_temporal_list = None
                     prev_hidden_temporal_list_flip = None
                     hideen_temporal_first = None
+                    hideen_temporal_first_flip = None
                     loss = None
                     last_frame = False
                     max_ii = min(len(inputs),args.length_clip)                      
@@ -288,11 +290,14 @@ def trainIters(args):
                             prev_mask_flip = y_mask_flip
                             if args.use_GS_hidden:
                                 mask_first = y_mask
+                                if args.use_flip:
+                                    mask_first_flip = y_mask_flip
                             else:
                                 mask_first = None
+                                mask_first_flip = None
                                 
                         #From one frame to the following frame the prev_hidden_temporal_list is updated.
-                        loss, losses, outs, hidden_temporal_list, sw_mask = runIter(args, encoder, decoder, x, y_mask, sw_mask,
+                        loss, losses, outs, hidden_temporal_list, sw_mask,out_masks = runIter(args, encoder, decoder, x, y_mask, sw_mask,
                                                                            crits, optims, split,
                                                                            loss, prev_hidden_temporal_list,hideen_temporal_first,prev_mask,mask_first,last_frame)
                         if ii == 0:
@@ -301,15 +306,18 @@ def trainIters(args):
                         if split == 'train':        
                             
                             if args.use_flip:                           
-                                loss_flip, _, outs_flip, hidden_temporal_list_flip, _ = runIter(args, encoder, decoder, x_flip, y_mask_flip, sw_mask,
+                                loss_flip, _, outs_flip, hidden_temporal_list_flip, _, out_masks_flip = runIter(args, encoder, decoder, x_flip, y_mask_flip, sw_mask,
                                                                                    crits, optims, split,
-                                                                                   0, prev_hidden_temporal_list_flip,None, prev_mask_flip,None, last_frame)
+                                                                                   0, prev_hidden_temporal_list_flip,hideen_temporal_first_flip, prev_mask_flip,mask_first_flip, last_frame)
 
-                                annot_flip = torch.reshape(outs_flip,(outs_flip.shape[0],outs_flip.shape[1],x.shape[2],x.shape[3]))
-                                annot_flip_flip =  np.flip(annot_flip.cpu().numpy(),axis=3)
+                                if ii == 0:
+                                    hideen_temporal_first_flip = hidden_temporal_list_flip
+                            
+                                annot_flip = torch.reshape(out_masks_flip,(out_masks_flip.shape[0],out_masks_flip.shape[1],x.shape[2],x.shape[3]))
+                                annot_flip_flip =  np.flip(annot_flip.detach().cpu().numpy(),axis=3)
                                 ann_ff_tensor = torch.from_numpy(annot_flip_flip.copy())
-                                outs_flip_flip = torch.reshape(ann_ff_tensor,np.shape(outs_flip)).cuda()
-                                orig_flip_iou = mask_siou(outs.view(-1,outs.size()[-1]),outs_flip_flip.view(-1,outs_flip_flip.size()[-1]), sw_mask.view(-1,1))
+                                outs_flip_flip = torch.reshape(ann_ff_tensor,np.shape(out_masks_flip)).cuda()
+                                orig_flip_iou = mask_siou(y_mask.view(-1,y_mask.size()[-1]),outs_flip_flip.view(-1,outs_flip_flip.size()[-1]), sw_mask.view(-1,1))
                                 orig_flip_iou = torch.mean(orig_flip_iou)
                             else:
                                 orig_flip_iou = 0
@@ -416,7 +424,7 @@ if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
     
-    args.use_flip = 0 # Use consistency term
+    args.use_flip = 1 # Use consistency term
     args.use_GS_hidden = 1 # Add hidden state of one shot GS along all the process
     
     args.log_term = False
@@ -426,7 +434,7 @@ if __name__ == "__main__":
         
     args.num_workers = 0
     args.max_epoch = 20
-    args.length_clip = 8
+    args.length_clip = 5
     args.batch_size = 4
     args.dataset = 'youtube'
     args.print_every = 200
