@@ -5,6 +5,7 @@
 ### YouTube-VOS
 
 Download the YouTube-VOS dataset from their [website](https://youtube-vos.org/). 
+Create a folder named ```databases```in the parent folder of the root directory of this project and put there the database in a folder named ```YOUTUBE```.
 ### DAVIS 2017
 
 Download the DAVIS 2017 dataset from their [website](https://davischallenge.org/davis2017/code.html) at 480p resolution. Create a folder named ```databases```in the parent folder of the root directory of this project and put there the database in a folder named ```DAVIS2017```. The root directory (```rvos```folder) and the ```databases``` folder should be in the same directory.
